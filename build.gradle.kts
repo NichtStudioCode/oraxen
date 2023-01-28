@@ -7,8 +7,8 @@ plugins {
     id("idea")
     id("eclipse")
     id("maven-publish")
-    id("com.github.johnrengelman.shadow") version "7.1.2"
     id("xyz.jpenilla.run-paper") version "2.0.1"
+    `maven-publish`
 }
 
 val pluginVersion = "1.151.0"
@@ -76,7 +76,6 @@ dependencies {
 }
 
 tasks {
-
     compileJava {
         options.encoding = Charsets.UTF_8.name()
         options.release.set(17)
@@ -97,38 +96,12 @@ tasks {
     runServer {
         minecraftVersion("1.19.3")
     }
-
-    shadowJar {
-        //archiveClassifier = null
-        relocate("org.bstats", "io.th0rgal.oraxen.shaded.bstats")
-        relocate("net.kyori", "io.th0rgal.oraxen.shaded.kyori")
-        relocate("dev.triumphteam.gui", "io.th0rgal.oraxen.shaded.triumphteam.gui")
-        relocate("com.jeff_media.customblockdata", "io.th0rgal.oraxen.shaded.customblockdata")
-        relocate("com.jeff_media.morepersistentdatatypes", "io.th0rgal.oraxen.shaded.morepersistentdatatypes")
-        relocate("com.github.stefvanschie.inventoryframework", "io.th0rgal.oraxen.shaded.if")
-        relocate("dev.jorel.commandapi", "io.th0rgal.oraxen.shaded.commandapi")
-        relocate("me.gabytm.util.actions", "io.th0rgal.oraxen.shaded.actions")
-        relocate("org.intellij.lang.annotations", "io.th0rgal.oraxen.shaded.intellij.annotations")
-        relocate("org.jetbrains.annotations", "io.th0rgal.oraxen.shaded.jetbrains.annotations")
-        relocate("com.udojava.evalex", "io.th0rgal.oraxen.shaded.evalex")
-        //mapOf("dir" to "libs/compile", "include" to listOf("*.jar"))
-        manifest {
-            attributes(
-                mapOf(
-                    "Built-By" to System.getProperty("user.name"),
-                    "Version" to pluginVersion,
-                    "Build-Timestamp" to SimpleDateFormat("yyyy-MM-dd' 'HH:mm:ss.SSSZ").format(Date.from(Instant.now())),
-                    "Created-By" to "Gradle ${gradle.gradleVersion}",
-                    "Build-Jdk" to "${System.getProperty("java.version")} ${System.getProperty("java.vendor")} ${System.getProperty("java.vm.version")}",
-                    "Build-OS" to "${System.getProperty("os.name")} ${System.getProperty("os.arch")} ${System.getProperty("os.version")}"
-                )
-            )
-        }
-        archiveFileName.set("oraxen-${pluginVersion}.jar")
+    
+    register<Jar>("sources") {
+        dependsOn(JavaPlugin.CLASSES_TASK_NAME)
+        from("src/main/java")
+        archiveClassifier.set("sources")
     }
-
-    compileJava.get().dependsOn(clean)
-    build.get().dependsOn(shadowJar)
 }
 
 val pluginPath = project.findProperty("oraxen_plugin_path")
@@ -143,6 +116,25 @@ if (pluginPath != null) {
         }
         named<DefaultTask>("build") {
             dependsOn("copyJar")
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            credentials {
+                name = "xenondevs"
+                url = uri("https://repo.xenondevs.xyz/third-party-releases/")
+                credentials(PasswordCredentials::class)
+            }
+        }
+    }
+    
+    publications {
+        create<MavenPublication>("oraxen") {
+            from(components["java"])
+            artifact(tasks["sources"])
         }
     }
 }
