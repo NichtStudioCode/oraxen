@@ -138,7 +138,6 @@ if (pluginPath != null) {
     tasks {
         register<Copy>("copyJar") {
             this.doNotTrackState("Overwrites the plugin jar to allow for easier reloading")
-            dependsOn(shadowJar, jar)
             from(findByName("reobfJar") ?: findByName("shadowJar") ?: findByName("jar"))
             into(pluginPath)
             doLast {
