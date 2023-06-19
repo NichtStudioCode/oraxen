@@ -4,14 +4,16 @@ import com.github.stefvanschie.inventoryframework.gui.GuiItem;
 import com.github.stefvanschie.inventoryframework.gui.type.ChestGui;
 import com.github.stefvanschie.inventoryframework.pane.PaginatedPane;
 import com.github.stefvanschie.inventoryframework.pane.StaticPane;
+import com.github.stefvanschie.inventoryframework.pane.util.Slot;
 import io.th0rgal.oraxen.OraxenPlugin;
 import io.th0rgal.oraxen.api.OraxenItems;
 import io.th0rgal.oraxen.config.ResourcesManager;
+import io.th0rgal.oraxen.config.Settings;
 import io.th0rgal.oraxen.font.FontManager;
 import io.th0rgal.oraxen.items.ItemBuilder;
 import io.th0rgal.oraxen.items.ItemUpdater;
-import io.th0rgal.oraxen.utils.AdventureUtils;
 import io.th0rgal.oraxen.utils.Utils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -28,10 +30,7 @@ public class ItemsView {
 
     private final YamlConfiguration settings = new ResourcesManager(OraxenPlugin.get()).getSettings();
     private final FontManager fontManager = OraxenPlugin.get().getFontManager();
-    private final String baseMenuTexture = ChatColor.WHITE +
-            fontManager.getShift(-18) +
-            fontManager.getGlyphFromName("menu_items").getCharacter() +
-            fontManager.getShift(-193);
+    private final String baseMenuTexture = Settings.ORAXEN_INV_TITLE.toString();
     ChestGui mainGui;
 
     public ChestGui create() {
@@ -42,15 +41,22 @@ public class ItemsView {
                 files.put(file, createSubGUI(file.getName(), unexcludedItems));
         }
         final int rows = (files.size() - 1) / 9 + 1;
-        mainGui = new ChestGui(6, getMenuTexture("<#84CBFF>"));
+        mainGui = new ChestGui((int) Settings.ORAXEN_INV_ROWS.getValue(), Settings.ORAXEN_INV_TITLE.toString());
         final StaticPane filesPane = new StaticPane(0, 0, 9, rows);
         int i = 0;
+        int highestSlot = 0;
         for (final var entry : files.entrySet()) {
-            final GuiItem item = new GuiItem(getItemStack(entry.getKey()), event ->
+            Pair<ItemStack, Integer> itemSlotPair = getItemStack(entry.getKey());
+            ItemStack itemStack = itemSlotPair.getLeft();
+            int slot = itemSlotPair.getRight() > -1 ? itemSlotPair.getRight() : i;
+            final GuiItem item = new GuiItem(itemStack, event ->
                     entry.getValue().show(event.getWhoClicked()));
-            filesPane.addItem(item, i % 9, i / 9);
+            highestSlot = Math.max(highestSlot, slot);
+            filesPane.setHeight(highestSlot / 9 + 1);
+            filesPane.addItem(item, Slot.fromIndex(slot));
             i++;
         }
+
 
         mainGui.addPane(filesPane);
         mainGui.setOnTopClick(event -> event.setCancelled(true));
@@ -59,9 +65,9 @@ public class ItemsView {
 
     private ChestGui createSubGUI(final String fileName, final List<ItemBuilder> items) {
         final int rows = Math.min((items.size() - 1) / 9 + 2, 6);
-        final ChestGui gui = new ChestGui(6,
-                getMenuTexture(settings.getString(String.format("gui_inventory.%s.color",
-                        Utils.removeExtension(fileName)))));
+        final ChestGui gui = new ChestGui(6, settings.getString(
+                String.format("oraxen_inventory.menu_layout.%s.title", Utils.removeExtension(fileName)), Settings.ORAXEN_INV_TITLE.toString())
+                .replace("<main_menu_title>", Settings.ORAXEN_INV_TITLE.toString()));
         final PaginatedPane pane = new PaginatedPane(9, rows);
 
         for (int i = 0; i < (items.size() - 1) / 45 + 1; i++) {
@@ -128,9 +134,9 @@ public class ItemsView {
         return output;
     }
 
-    private ItemStack getItemStack(final File file) {
+    private Pair<ItemStack, Integer> getItemStack(final File file) {
         ItemStack itemStack;
-        String material = settings.getString(String.format("gui_inventory.%s.icon", Utils.removeExtension(file.getName())), "PAPER");
+        String material = settings.getString(String.format("oraxen_inventory.menu_layout.%s.icon", Utils.removeExtension(file.getName())), "PAPER");
 
         try {
             itemStack = new ItemBuilder(OraxenItems.getItemById(material).build())
@@ -155,11 +161,6 @@ public class ItemsView {
             // avoid possible bug if isOraxenItems is available but can't be an itemstack
             itemStack = new ItemBuilder(Material.PAPER).setDisplayName(ChatColor.GREEN + file.getName()).build();
 
-        return itemStack;
-    }
-
-    private String getMenuTexture(final String color) {
-        return baseMenuTexture + AdventureUtils.LEGACY_SERIALIZER.serialize(AdventureUtils.MINI_MESSAGE
-                .deserialize(color + fontManager.getGlyphFromName("menu_items_overlay").getCharacter()));
+        return Pair.of(itemStack, settings.getInt(String.format("oraxen_inventory.menu_layout.%s.slot", Utils.removeExtension(file.getName())), -1) - 1);
     }
 }

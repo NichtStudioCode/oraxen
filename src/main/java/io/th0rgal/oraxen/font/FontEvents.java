@@ -1,12 +1,17 @@
 package io.th0rgal.oraxen.font;
 
+import io.papermc.paper.event.player.AsyncChatDecorateEvent;
 import io.th0rgal.oraxen.OraxenPlugin;
 import io.th0rgal.oraxen.api.OraxenItems;
 import io.th0rgal.oraxen.compatibilities.provided.placeholderapi.PapiAliases;
 import io.th0rgal.oraxen.config.Message;
 import io.th0rgal.oraxen.config.Settings;
 import io.th0rgal.oraxen.utils.AdventureUtils;
+import io.th0rgal.oraxen.utils.Utils;
 import net.kyori.adventure.inventory.Book;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextReplacementConfig;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -25,6 +30,7 @@ import org.bukkit.inventory.AnvilInventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BookMeta;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.PluginManager;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -35,10 +41,17 @@ public class FontEvents implements Listener {
 
     public FontEvents(FontManager manager) {
         this.manager = manager;
+        PluginManager pluginManager = OraxenPlugin.get().getServer().getPluginManager();
+        /*if (VersionUtil.isPaperServer()) {
+            pluginManager.registerEvents(new PaperChatHandler(), OraxenPlugin.get());
+        } else pluginManager.registerEvents(new SpigotChatHandler(), OraxenPlugin.get());*/
+        pluginManager.registerEvents(new SpigotChatHandler(), OraxenPlugin.get());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBookGlyph(final PlayerEditBookEvent event) {
+        if (!Settings.FORMAT_BOOKS.toBool()) return;
+
         BookMeta meta = event.getNewBookMeta();
         for (String page : meta.getPages()) {
             int i = meta.getPages().indexOf(page) + 1;
@@ -57,6 +70,8 @@ public class FontEvents implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBookGlyph(final PlayerInteractEvent event) {
+        if (!Settings.FORMAT_BOOKS.toBool()) return;
+
         if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
         if (event.getItem() == null || !(event.getItem().getItemMeta() instanceof BookMeta meta)) return;
         if (event.getItem().getType() != Material.WRITTEN_BOOK) return;
@@ -90,7 +105,7 @@ public class FontEvents implements Listener {
         }
     }
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onSignGlyph(final SignChangeEvent event) {
         if (!Settings.FORMAT_SIGNS.toBool()) return;
 
@@ -121,30 +136,6 @@ public class FontEvents implements Listener {
     }
 
     @EventHandler
-    public void onPlayerChat(AsyncPlayerChatEvent event) {
-        String message = event.getMessage();
-        for (Character character : manager.getReverseMap().keySet()) {
-            if (!message.contains(String.valueOf(character)))
-                continue;
-            Glyph glyph = manager.getGlyphFromName(manager.getReverseMap().get(character));
-            if (!glyph.hasPermission(event.getPlayer())) {
-                Message.NO_PERMISSION.send(event.getPlayer(), AdventureUtils.tagResolver("permission", glyph.getPermission()));
-                event.setCancelled(true);
-            }
-        }
-        for (Map.Entry<String, Glyph> entry : manager.getGlyphByPlaceholderMap().entrySet())
-            if (entry.getValue().hasPermission(event.getPlayer()))
-                message = (manager.permsChatcolor == null)
-                        ? message.replace(entry.getKey(),
-                        String.valueOf(entry.getValue().getCharacter()))
-                        : message.replace(entry.getKey(),
-                        ChatColor.WHITE + String.valueOf(entry.getValue().getCharacter())
-                                + PapiAliases.setPlaceholders(event.getPlayer(), manager.permsChatcolor));
-
-        event.setMessage(message);
-    }
-
-    @EventHandler
     public void onPlayerRename(final InventoryClickEvent event) {
         if (!(event.getClickedInventory() instanceof AnvilInventory clickedInv)) return;
         Player player = (Player) event.getWhoClicked();
@@ -156,28 +147,24 @@ public class FontEvents implements Listener {
                 ItemStack current = event.getCurrentItem();
 
                 // Adding item to first slot
+                if (!Settings.FORMAT_ANVIL.toBool()) return;
                 if (cursor != null && cursor.getType() != Material.AIR && OraxenItems.exists(cursor)) {
-                    ItemMeta meta = cursor.getItemMeta();
-                    if (meta == null || !meta.hasDisplayName()) return;
-                    String name = meta.getDisplayName();
-                    name = AdventureUtils.MINI_MESSAGE.serialize(AdventureUtils.LEGACY_SERIALIZER.deserialize(name)).replace("\\<", "<");
-                    meta.setDisplayName(name);
-                    cursor.setItemMeta(meta);
+                    Utils.editItemMeta(cursor, meta ->
+                            meta.setDisplayName(AdventureUtils.parseLegacy(meta.getDisplayName())));
                 }
                 // Taking item from first slot
                 else if (current != null && current.getType() != Material.AIR && OraxenItems.exists(current)) {
-                    ItemMeta meta = current.getItemMeta();
-                    if (meta == null || !meta.hasDisplayName()) return;
-                    String name = meta.getDisplayName();
-                    meta.setDisplayName(AdventureUtils.parseLegacyThroughMiniMessage(name));
-                    current.setItemMeta(meta);
+                    Utils.editItemMeta(current, meta ->
+                            meta.setDisplayName(AdventureUtils.parseLegacy(meta.getDisplayName())));
                 }
             }
             case 2 -> { // Clicking result item
                 ItemStack clickedItem = clickedInv.getItem(2);
                 if (clickedItem == null) return;
                 if (displayName == null || displayName.isBlank()) return;
-                if (!OraxenItems.exists(clickedItem)) return;
+
+                if (Settings.FORMAT_ANVIL.toBool())
+                    displayName = AdventureUtils.parseLegacyThroughMiniMessage(displayName);
 
                 for (Character character : manager.getReverseMap().keySet()) {
                     if (!displayName.contains(String.valueOf(character))) continue;
@@ -202,8 +189,7 @@ public class FontEvents implements Listener {
 
                 ItemMeta meta = clickedItem.getItemMeta();
                 if (meta == null) return;
-                if (Settings.FORMAT_ANVIL.toBool())
-                    meta.setDisplayName(AdventureUtils.parseLegacyThroughMiniMessage(displayName));
+                meta.setDisplayName(displayName);
                 clickedItem.setItemMeta(meta);
             }
         }
@@ -211,6 +197,66 @@ public class FontEvents implements Listener {
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
-        manager.sendGlyphTabCompletion(event.getPlayer(), true);
+        manager.sendGlyphTabCompletion(event.getPlayer());
+    }
+
+    public class SpigotChatHandler implements Listener {
+        @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+        public void onPlayerChat(AsyncPlayerChatEvent event) {
+            if (!Settings.FORMAT_CHAT.toBool()) return;
+
+            String message = event.getMessage();
+            for (Character character : manager.getReverseMap().keySet()) {
+                if (!message.contains(String.valueOf(character)))
+                    continue;
+                Glyph glyph = manager.getGlyphFromName(manager.getReverseMap().get(character));
+                if (!glyph.hasPermission(event.getPlayer())) {
+                    Message.NO_PERMISSION.send(event.getPlayer(), AdventureUtils.tagResolver("permission", glyph.getPermission()));
+                    event.setCancelled(true);
+                    return;
+                }
+            }
+
+
+            for (Map.Entry<String, Glyph> entry : manager.getGlyphByPlaceholderMap().entrySet()) {
+                String unicode = ChatColor.WHITE + String.valueOf(entry.getValue().getCharacter());
+                if (entry.getValue().hasPermission(event.getPlayer()))
+                    message = (manager.permsChatcolor == null)
+                            ? message.replace(entry.getKey(), unicode)
+                            : message.replace(entry.getKey(), unicode + PapiAliases.setPlaceholders(event.getPlayer(), manager.permsChatcolor));
+            }
+
+            event.setMessage(message);
+        }
+    }
+
+
+    @SuppressWarnings("UnstableApiUsage")
+    public class PaperChatHandler implements Listener {
+
+        @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+        public void onPlayerChat(AsyncChatDecorateEvent event) {
+            if (!Settings.FORMAT_CHAT.toBool()) return;
+
+            Player player = event.player();
+            Component message = event.result();
+            for (Character character : manager.getReverseMap().keySet()) {
+                if (!message.contains(Component.text(character))) continue;
+
+                Glyph glyph = manager.getGlyphFromName(manager.getReverseMap().get(character));
+                if (!glyph.hasPermission(player)) {
+                    Message.NO_PERMISSION.send(player, AdventureUtils.tagResolver("permission", glyph.getPermission()));
+                    event.setCancelled(true);
+                    return;
+                }
+            }
+
+            for (Map.Entry<String, Glyph> entry : manager.getGlyphByPlaceholderMap().entrySet()) {
+                message = message.replaceText(TextReplacementConfig.builder().match(entry.getKey())
+                        .replacement(Component.text(entry.getValue().getCharacter()).color(NamedTextColor.WHITE)).build());
+            }
+
+            event.result(message);
+        }
     }
 }

@@ -29,7 +29,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
-import org.bukkit.event.Event;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -41,10 +40,7 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Consumer;
 
 import static io.th0rgal.oraxen.mechanics.provided.gameplay.block.BlockMechanicFactory.getBlockMechanic;
@@ -83,18 +79,18 @@ public class BreakerSystem {
                     BlockFace.UP;
 
             HardnessModifier triggeredModifier = null;
-            for (final HardnessModifier modifier : MODIFIERS)
+            for (final HardnessModifier modifier : MODIFIERS) {
                 if (modifier.isTriggered(player, block, item)) {
                     triggeredModifier = modifier;
                     break;
                 }
+            }
             if (triggeredModifier == null) return;
             final long period = triggeredModifier.getPeriod(player, block, item);
             if (period == 0) return;
             if (block.getType() == Material.NOTE_BLOCK && !OraxenBlocks.isOraxenNoteBlock(block)) return;
             if (block.getType() == Material.TRIPWIRE_HOOK && !OraxenBlocks.isOraxenStringBlock(block)) return;
             if (block.getType() == Material.BARRIER && !OraxenFurniture.isFurniture(block)) return;
-
 
             event.setCancelled(true);
 
@@ -112,16 +108,11 @@ public class BreakerSystem {
                     breakerPerLocation.get(location).cancelTasks(OraxenPlugin.get());
 
                 final BukkitScheduler scheduler = Bukkit.getScheduler();
-                final PlayerInteractEvent playerInteractEvent = new PlayerInteractEvent(
-                        player,
-                        Action.LEFT_CLICK_BLOCK,
-                        player.getInventory().getItemInMainHand(),
-                        block,
-                        blockFace,
-                        EquipmentSlot.HAND
-                );
+                // Cancellation state is being ignored.
+                // However still needs to be called for plugin support.
+                final PlayerInteractEvent playerInteractEvent =
+                        new PlayerInteractEvent(player, Action.LEFT_CLICK_BLOCK, player.getInventory().getItemInMainHand(), block, blockFace, EquipmentSlot.HAND);
                 scheduler.runTask(OraxenPlugin.get(), () -> Bukkit.getPluginManager().callEvent(playerInteractEvent));
-                if (playerInteractEvent.useInteractedBlock().equals(Event.Result.DENY)) return;
 
                 // If the relevant damage event is cancelled, return
                 if (blockDamageEventCancelled(block, player)) return;
@@ -134,6 +125,11 @@ public class BreakerSystem {
 
                     @Override
                     public void accept(final BukkitTask bukkitTask) {
+                        // Methods for sending multi-barrier block-breaks
+                        final FurnitureMechanic furnitureMechanic = OraxenFurniture.getFurnitureMechanic(block);
+                        final Entity furnitureBaseEntity = furnitureMechanic != null ? furnitureMechanic.getBaseEntity(block) : null;
+                        final List<Location> furnitureBarrierLocations = furnitureMechanic != null && furnitureBaseEntity != null ? furnitureMechanic.getLocations(FurnitureMechanic.getFurnitureYaw(furnitureBaseEntity), furnitureBaseEntity.getLocation(), furnitureMechanic.getBarriers()) : Collections.singletonList(block.getLocation());
+
                         if (!breakerPerLocation.containsKey(location)) {
                             bukkitTask.cancel();
                             return;
@@ -144,7 +140,10 @@ public class BreakerSystem {
 
                         for (final Entity entity : world.getNearbyEntities(location, 16, 16, 16))
                             if (entity instanceof Player viewer) {
-                                sendBlockBreak(viewer, location, value);
+                                if (furnitureMechanic != null) {
+                                    for (Location barrierLoc : furnitureBarrierLocations)
+                                        sendBlockBreak(viewer, barrierLoc, value);
+                                } else sendBlockBreak(viewer, location, value);
                             }
 
                         if (value++ < 10) return;
@@ -161,9 +160,14 @@ public class BreakerSystem {
                         Bukkit.getScheduler().runTask(OraxenPlugin.get(), () ->
                                 player.removePotionEffect(PotionEffectType.SLOW_DIGGING));
                         breakerPerLocation.remove(location);
-                        for (final Entity entity : world.getNearbyEntities(location, 16, 16, 16))
-                            if (entity instanceof Player viewer)
-                                sendBlockBreak(viewer, location, 10);
+                        for (final Entity entity : world.getNearbyEntities(location, 16, 16, 16)) {
+                            if (entity instanceof Player viewer) {
+                                if (furnitureMechanic != null) {
+                                    for (Location barrierLoc : furnitureBarrierLocations)
+                                        sendBlockBreak(viewer, barrierLoc, value);
+                                } else sendBlockBreak(viewer, location, value);
+                            }
+                        }
                         bukkitTask.cancel();
                     }
                 }, period, period);
@@ -190,12 +194,16 @@ public class BreakerSystem {
 
         switch (block.getType()) {
             case NOTE_BLOCK -> {
-                OraxenNoteBlockDamageEvent event = new OraxenNoteBlockDamageEvent(OraxenBlocks.getNoteBlockMechanic(block), block, player);
+                NoteBlockMechanic mechanic = OraxenBlocks.getNoteBlockMechanic(block);
+                if (mechanic == null) return true;
+                OraxenNoteBlockDamageEvent event = new OraxenNoteBlockDamageEvent(mechanic, block, player);
                 Bukkit.getScheduler().runTask(OraxenPlugin.get(), () -> Bukkit.getPluginManager().callEvent(event));
                 return event.isCancelled();
             }
             case TRIPWIRE -> {
-                OraxenStringBlockDamageEvent event = new OraxenStringBlockDamageEvent(OraxenBlocks.getStringMechanic(block), block, player);
+                StringBlockMechanic mechanic = OraxenBlocks.getStringMechanic(block);
+                if (mechanic == null) return true;
+                OraxenStringBlockDamageEvent event = new OraxenStringBlockDamageEvent(mechanic, block, player);
                 Bukkit.getScheduler().runTask(OraxenPlugin.get(), () -> Bukkit.getPluginManager().callEvent(event));
                 return event.isCancelled();
             }
@@ -204,7 +212,9 @@ public class BreakerSystem {
                     return Bukkit.getScheduler().callSyncMethod(OraxenPlugin.get(), () -> {
                         FurnitureMechanic mechanic = OraxenFurniture.getFurnitureMechanic(block);
                         if (mechanic == null) return true;
-                        OraxenFurnitureDamageEvent event = new OraxenFurnitureDamageEvent(mechanic, player, block, mechanic.getItemFrame(block));
+                        Entity baseEntity = mechanic.getBaseEntity(block);
+                        if (baseEntity == null) return true;
+                        OraxenFurnitureDamageEvent event = new OraxenFurnitureDamageEvent(mechanic, baseEntity, player, block);
                         Bukkit.getScheduler().runTask(OraxenPlugin.get(), () -> Bukkit.getPluginManager().callEvent(event));
                         return event.isCancelled();
                     }).get();
@@ -212,7 +222,12 @@ public class BreakerSystem {
                     return false;
                 }
             }
-            default -> { return true; }
+            case BEDROCK -> { // For BedrockBreakMechanic
+                return false;
+            }
+            default -> {
+                return true;
+            }
         }
     }
 

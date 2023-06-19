@@ -45,6 +45,7 @@ public class CommandsManager {
                 .withSubcommand((new BlockInfoCommand()).getBlockInfoCommand())
                 .withSubcommand((new HudCommand()).getHudCommand())
                 .withSubcommand((new LogDumpCommand().getLogDumpCommand()))
+                .withSubcommand((new GestureCommand().getGestureCommand()))
                 .executes((sender, args) -> {
                     Message.COMMAND_HELP.send(sender);
                 })
@@ -66,7 +67,7 @@ public class CommandsManager {
                     if (sender instanceof Player player) {
                         Color hexColor;
                         try {
-                            hexColor = hex2Rgb((String) args[0]);
+                            hexColor = hex2Rgb((String) args.get(0));
                         } catch (StringIndexOutOfBoundsException e) {
                             Message.DYE_WRONG_COLOR.send(sender);
                             return;
@@ -94,8 +95,8 @@ public class CommandsManager {
                         .replaceSuggestions(ArgumentSuggestions.strings("send", "msg")))
                 .withArguments(new EntitySelectorArgument.ManyPlayers("targets"))
                 .executes((sender, args) -> {
-                    final Collection<Player> targets = (Collection<Player>) args[1];
-                    if (args[0].equals("msg"))
+                    final Collection<Player> targets = (Collection<Player>) args.get(1);
+                    if (args.get(0).equals("msg"))
                         for (final Player target : targets)
                             Message.COMMAND_JOIN_MESSAGE.send(target, AdventureUtils.tagResolver("pack_url",
                                     (OraxenPlugin.get().getUploadManager().getHostingProvider().getPackURL())));
@@ -126,14 +127,14 @@ public class CommandsManager {
                                 .replaceSuggestions(ArgumentSuggestions.strings(OraxenItems.getItemNames())),
                         new IntegerArgument("amount"))
                 .executes((sender, args) -> {
-                    final Collection<Player> targets = (Collection<Player>) args[0];
-                    final String itemID = (String) args[1];
+                    final Collection<Player> targets = (Collection<Player>) args.get(0);
+                    final String itemID = (String) args.get(1);
                     final ItemBuilder itemBuilder = OraxenItems.getItemById(itemID);
                     if (itemBuilder == null) {
                         Message.ITEM_NOT_FOUND.send(sender, AdventureUtils.tagResolver("item", itemID));
                         return;
                     }
-                    int amount = (int) args[2];
+                    int amount = (int) args.get(2);
                     final int max = itemBuilder.getMaxStackSize();
                     final int slots = amount / max + (max % amount > 0 ? 1 : 0);
                     final ItemStack[] items = itemBuilder.buildArray(slots > 36 ? (amount = max * 36) : amount);
@@ -165,8 +166,8 @@ public class CommandsManager {
                         new TextArgument("item")
                                 .replaceSuggestions(ArgumentSuggestions.strings(info -> OraxenItems.getItemNames())))
                 .executes((sender, args) -> {
-                    final Collection<Player> targets = (Collection<Player>) args[0];
-                    final String itemID = (String) args[1];
+                    final Collection<Player> targets = (Collection<Player>) args.get(0);
+                    final String itemID = (String) args.get(1);
                     final ItemBuilder itemBuilder = OraxenItems.getItemById(itemID);
                     if (itemBuilder == null) {
                         Message.ITEM_NOT_FOUND.send(sender, AdventureUtils.tagResolver("item", itemID));
@@ -194,18 +195,21 @@ public class CommandsManager {
                 .withPermission("oraxen.command.update")
                 .withArguments(new EntitySelectorArgument.ManyPlayers("targets"))
                 .withArguments(new TextArgument("type")
-                        .replaceSuggestions(ArgumentSuggestions.strings("hand", "all")))
+                        .replaceSuggestions(ArgumentSuggestions.strings("hand", "offhand", "all")))
                 .executes((sender, args) -> {
-                    final Collection<Player> targets = (Collection<Player>) args[0];
+                    final Collection<Player> targets = (Collection<Player>) args.get(0);
 
-                    if ("hand".equals(args[1])) for (final Player player : targets) {
+                    if ("hand".equals(args.get(1))) for (final Player player : targets) {
                         player.getInventory().setItemInMainHand(
                                 ItemUpdater.updateItem(player.getInventory().getItemInMainHand()));
                         Message.UPDATED_ITEMS.send(sender, AdventureUtils.tagResolver("amount", String.valueOf(1)),
                                 AdventureUtils.tagResolver("player", player.getDisplayName()));
-                    }
-
-                    if (sender.hasPermission("oraxen.command.update.all")) for (final Player player : targets) {
+                    } else if ("offhand".equals(args.get(1))) for (final Player player : targets) {
+                        player.getInventory().setItemInOffHand(
+                                ItemUpdater.updateItem(player.getInventory().getItemInOffHand()));
+                        Message.UPDATED_ITEMS.send(sender, AdventureUtils.tagResolver("amount", String.valueOf(1)),
+                                AdventureUtils.tagResolver("player", player.getDisplayName()));
+                    } else if (sender.hasPermission("oraxen.command.update.all")) for (final Player player : targets) {
                         int updated = 0;
                         for (int i = 0; i < player.getInventory().getSize(); i++) {
                             final ItemStack oldItem = player.getInventory().getItem(i);
@@ -215,6 +219,7 @@ public class CommandsManager {
                             player.getInventory().setItem(i, newItem);
                             updated++;
                         }
+                        player.updateInventory();
                         Message.UPDATED_ITEMS.send(sender, AdventureUtils.tagResolver("amount", String.valueOf(updated)),
                                 AdventureUtils.tagResolver("player", player.getDisplayName()));
                     }

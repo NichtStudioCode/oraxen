@@ -3,9 +3,9 @@ package io.th0rgal.oraxen.mechanics.provided.gameplay.block;
 import io.th0rgal.oraxen.api.OraxenBlocks;
 import io.th0rgal.oraxen.api.OraxenItems;
 import io.th0rgal.oraxen.mechanics.MechanicFactory;
+import io.th0rgal.oraxen.mechanics.provided.gameplay.limitedplacing.LimitedPlacing;
 import io.th0rgal.oraxen.utils.BlockHelpers;
 import io.th0rgal.oraxen.utils.Utils;
-import io.th0rgal.oraxen.utils.limitedplacing.LimitedPlacing;
 import io.th0rgal.protectionlib.ProtectionLib;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -73,15 +73,15 @@ public class BlockMechanicListener implements Listener {
 
         if (item == null || block == null) return;
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK || block.getType() != Material.NOTE_BLOCK) return;
-        if (block.getType().isInteractable() && block.getType() != Material.NOTE_BLOCK) return;
-
         BlockMechanic mechanic = (BlockMechanic) factory.getMechanic(OraxenItems.getIdByItem(item));
         if (mechanic == null || !mechanic.hasLimitedPlacing()) return;
+
+        if (block.getType().isInteractable() && block.getType() != Material.NOTE_BLOCK) return;
 
         LimitedPlacing limitedPlacing = mechanic.getLimitedPlacing();
         Block belowPlaced = block.getRelative(blockFace).getRelative(BlockFace.DOWN);
 
-        if (limitedPlacing.isNotPlacableOn(belowPlaced, blockFace)) {
+        if (limitedPlacing.isNotPlacableOn(block, blockFace)) {
             event.setCancelled(true);
         } else if (limitedPlacing.getType() == LimitedPlacing.LimitedPlacingType.ALLOW) {
             if (!limitedPlacing.checkLimitedMechanic(belowPlaced))
@@ -106,7 +106,7 @@ public class BlockMechanicListener implements Listener {
         final Player player = event.getPlayer();
         final Block target;
         final Material type = placedAgainst.getType();
-        if (BlockHelpers.REPLACEABLE_BLOCKS.contains(type))
+        if (BlockHelpers.isReplaceable(type))
             target = placedAgainst;
         else {
             target = placedAgainst.getRelative(event.getBlockFace());

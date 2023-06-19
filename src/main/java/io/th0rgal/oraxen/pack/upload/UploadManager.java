@@ -1,6 +1,7 @@
 package io.th0rgal.oraxen.pack.upload;
 
 import io.th0rgal.oraxen.OraxenPlugin;
+import io.th0rgal.oraxen.api.events.OraxenPackUploadEvent;
 import io.th0rgal.oraxen.compatibilities.CompatibilitiesManager;
 import io.th0rgal.oraxen.config.Message;
 import io.th0rgal.oraxen.config.Settings;
@@ -12,6 +13,7 @@ import io.th0rgal.oraxen.pack.receive.PackReceiver;
 import io.th0rgal.oraxen.pack.upload.hosts.HostingProvider;
 import io.th0rgal.oraxen.pack.upload.hosts.Polymath;
 import io.th0rgal.oraxen.utils.AdventureUtils;
+import io.th0rgal.oraxen.utils.logs.Logs;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
@@ -66,6 +68,11 @@ public class UploadManager {
                 Message.PACK_NOT_UPLOADED.log();
                 return;
             }
+
+            OraxenPackUploadEvent uploadEvent = new OraxenPackUploadEvent(hostingProvider);
+            Bukkit.getScheduler().scheduleSyncDelayedTask(OraxenPlugin.get(), () ->
+                    Bukkit.getPluginManager().callEvent(uploadEvent));
+
             Message.PACK_UPLOADED.log(
                     AdventureUtils.tagResolver("url", hostingProvider.getPackURL()),
                     AdventureUtils.tagResolver("delay", String.valueOf(System.currentTimeMillis() - time)));
@@ -97,11 +104,18 @@ public class UploadManager {
     }
 
     private HostingProvider createHostingProvider() {
-        return switch (Settings.UPLOAD_TYPE.toString().toLowerCase(Locale.ENGLISH)) {
+        HostingProvider provider = switch (Settings.UPLOAD_TYPE.toString().toLowerCase(Locale.ENGLISH)) {
             case "polymath" -> new Polymath(Settings.POLYMATH_SERVER.toString());
             case "external" -> createExternalProvider();
-            default -> throw new ProviderNotFoundException("Unknown provider type: " + Settings.UPLOAD_TYPE);
+            default -> null;
         };
+
+        if (provider == null) {
+            Logs.logError("Unknown Hosting-Provider type: " + Settings.UPLOAD_TYPE);
+            Logs.logError("Polymath will be used instead.");
+            provider = new Polymath(Settings.POLYMATH_SERVER.toString());
+        }
+        return provider;
     }
 
     private HostingProvider createExternalProvider() {

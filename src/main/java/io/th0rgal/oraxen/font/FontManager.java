@@ -1,13 +1,11 @@
 package io.th0rgal.oraxen.font;
 
-import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolManager;
-import com.comphenix.protocol.events.PacketContainer;
-import com.comphenix.protocol.wrappers.*;
 import io.th0rgal.oraxen.OraxenPlugin;
 import io.th0rgal.oraxen.config.ConfigsManager;
+import io.th0rgal.oraxen.config.Settings;
+import io.th0rgal.oraxen.utils.VersionUtil;
 import io.th0rgal.oraxen.utils.logs.Logs;
-import org.apache.commons.io.IOUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.Configuration;
 import org.bukkit.configuration.ConfigurationSection;
@@ -17,10 +15,10 @@ import org.bukkit.event.HandlerList;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.stream.Stream;
 
 public class FontManager {
 
@@ -84,34 +82,30 @@ public class FontManager {
 
     private void verifyRequiredGlyphs() {
         // Ensure shifts.yml exists as it is required
-        File shiftFile = new File(OraxenPlugin.get().getDataFolder() + "/glyphs/shifts.yml");
-        File requiredFile = new File(OraxenPlugin.get().getDataFolder() + "/glyphs/required.yml");
+        checkYamlKeys(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/shifts.yml"));
+        checkYamlKeys(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/required.yml"));
+    }
+
+    private void checkYamlKeys(File file) {
         File tempFile = new File(OraxenPlugin.get().getDataFolder() + "/glyphs/temp.yml");
         try {
-            Files.copy(Objects.requireNonNull(OraxenPlugin.get().getResource("glyphs/shifts.yml")), tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            if (!shiftFile.exists()) {
-                OraxenPlugin.get().saveResource("glyphs/shifts.yml", false);
+            Files.copy(Objects.requireNonNull(OraxenPlugin.get().getResource("glyphs/" + file.getName())), tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            if (!file.exists()) {
+                OraxenPlugin.get().saveResource("glyphs/" + file.getName(), false);
             }
-            // Check if shiftfile is equal to the resource
-            else if (!new HashSet<>(YamlConfiguration.loadConfiguration(shiftFile).getKeys(false).stream().toList()).containsAll(YamlConfiguration.loadConfiguration(tempFile).getKeys(false))) {
-                shiftFile.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/shifts.yml.old"));
-                OraxenPlugin.get().saveResource("glyphs/shifts.yml", true);
-                Logs.logWarning("glyphs/shifts.yml was incorrect, renamed to .old and regenerated the default one");
-            }
-        } catch (IOException e) {
-            shiftFile.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/shifts.yml.old"));
-            OraxenPlugin.get().saveResource("glyphs/shifts.yml", true);
-        }
-
-        try { // Ensure required.yml exists as it is required and that it contains required glyph
-            if (!Files.readString(requiredFile.toPath()).contains(IOUtils.toString(Objects.requireNonNull(OraxenPlugin.get().getResource("glyphs/required.yml")), StandardCharsets.UTF_8))) {
-                requiredFile.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/required.yml.old"));
-                OraxenPlugin.get().saveResource("glyphs/required.yml", true);
-                Logs.logWarning("glyphs/required.yml was incorrect, renamed to .old and regenerated the default one");
+            // Check if file is equal to the resource
+            else if (Settings.AUTOMATICALLY_SET_GLYPH_CODE.toBool()) {
+                List<String> tempKeys = YamlConfiguration.loadConfiguration(tempFile).getKeys(false).stream().toList();
+                List<String> requiredKeys = YamlConfiguration.loadConfiguration(file).getKeys(false).stream().toList();
+                if (!new HashSet<>(requiredKeys).containsAll(tempKeys)) {
+                    file.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/" + file.getName() + ".old"));
+                    OraxenPlugin.get().saveResource("glyphs/" + file.getName(), true);
+                    Logs.logWarning("glyphs/" + file.getName() +  " was incorrect, renamed to .old and regenerated the default one");
+                }
             }
         } catch (IOException e) {
-            requiredFile.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/required.yml.old"));
-            OraxenPlugin.get().saveResource("glyphs/required.yml", true);
+            file.renameTo(new File(OraxenPlugin.get().getDataFolder() + "/glyphs/" + file.getName() + ".old"));
+            OraxenPlugin.get().saveResource("glyphs/" + file.getName(), true);
         }
         tempFile.delete();
     }
@@ -163,36 +157,19 @@ public class FontManager {
         return output.toString();
     }
 
-    public void sendGlyphTabCompletion(Player player, Boolean addPlayers) {
-        for (Map.Entry<String, Glyph> entry : getGlyphByPlaceholderMap().entrySet()) {
-            if (entry.getValue().hasTabCompletion()) {
-                PacketContainer packet = protocolManager.createPacket(PacketType.Play.Server.PLAYER_INFO);
+    private final HashMap<Player, List<String>> currentGlyphCompletions = new HashMap<>();
+    public void sendGlyphTabCompletion(Player player) {
+        List<String> completions = getGlyphByPlaceholderMap().values().stream()
+                .filter(Glyph::hasTabCompletion)
+                .flatMap(glyph -> Settings.UNICODE_COMPLETIONS.toBool()
+                        ? Stream.of(String.valueOf(glyph.getCharacter()))
+                        : Arrays.stream(glyph.getPlaceholders()))
+                .toList();
 
-                if (addPlayers) packet.getPlayerInfoAction().write(0, EnumWrappers.PlayerInfoAction.ADD_PLAYER);
-                else {
-                    packet.getPlayerInfoAction().write(0, EnumWrappers.PlayerInfoAction.REMOVE_PLAYER);
-                }
-
-                final WrappedGameProfile profile = new WrappedGameProfile(
-                        UUID.randomUUID(), " " + entry.getValue().getCharacter());
-
-                if (entry.getValue().getTabIconTexture() != null && entry.getValue().getTabIconSignature() != null)
-                    profile.getProperties().put("textures",
-                            new WrappedSignedProperty(
-                                    "textures",
-                                    entry.getValue().getTabIconTexture(),
-                                    entry.getValue().getTabIconSignature()));
-
-                PlayerInfoData data = new PlayerInfoData(profile
-                        , 0, EnumWrappers.NativeGameMode.SPECTATOR,
-                        WrappedChatComponent.fromText(""));
-
-                List<PlayerInfoData> dataList = new ArrayList<>();
-                dataList.add(data);
-                packet.getPlayerInfoDataLists().write(0, dataList);
-
-                protocolManager.sendServerPacket(player, packet);
-            }
+        if (VersionUtil.isSupportedVersionOrNewer(VersionUtil.v1_19_R3)) {
+            player.removeCustomChatCompletions(currentGlyphCompletions.getOrDefault(player, new ArrayList<>()));
+            player.addCustomChatCompletions(completions);
+            currentGlyphCompletions.put(player, completions);
         }
     }
 }

@@ -2,6 +2,10 @@ package io.th0rgal.oraxen.utils;
 
 import com.jeff_media.customblockdata.CustomBlockData;
 import io.th0rgal.oraxen.OraxenPlugin;
+import io.th0rgal.oraxen.api.OraxenBlocks;
+import io.th0rgal.oraxen.api.OraxenFurniture;
+import io.th0rgal.oraxen.mechanics.provided.gameplay.furniture.FurnitureMechanic;
+import io.th0rgal.oraxen.mechanics.provided.gameplay.noteblock.NoteBlockMechanic;
 import org.apache.commons.lang3.Range;
 import org.bukkit.*;
 import org.bukkit.block.Sign;
@@ -61,6 +65,10 @@ public class BlockHelpers {
         return toCenterLocation(location).subtract(0,0.5,0);
     }
 
+    public static Location toSimpleLocation(Location location) {
+        return new Location(location.getWorld(), location.getX(), location.getY(), location.getZ(), 0f, 0f);
+    }
+
     public static boolean isStandingInside(final Player player, final Block block) {
         if (player == null) return false;
         final Location playerLoc = player.getLocation();
@@ -88,6 +96,41 @@ public class BlockHelpers {
     public static final List<Material> REPLACEABLE_BLOCKS = Arrays
             .asList(Material.SNOW, Material.VINE, Material.GRASS, Material.TALL_GRASS, Material.SEAGRASS, Material.FERN,
                     Material.LARGE_FERN, Material.AIR);
+
+    public static boolean isReplaceable(Block block) {
+        return REPLACEABLE_BLOCKS.contains(block.getType());
+    }
+
+    public static boolean isReplaceable(BlockData blockData) {
+        return REPLACEABLE_BLOCKS.contains(blockData.getMaterial());
+    }
+
+    public static boolean isReplaceable(Material material) {
+        return REPLACEABLE_BLOCKS.contains(material);
+    }
+
+    /**
+     * Improved version of {@link Material#isInteractable()} intended for replicating vanilla behavior.
+     * Checks if the block one places against is interactable in the sense a chest is
+     * Also checks if the block is an Oraxen block or not as NoteBlocks are Interacable
+     */
+    public static boolean isInteractable(Block placedAgainst) {
+        if (placedAgainst == null) return false;
+
+        NoteBlockMechanic noteBlockMechanic = OraxenBlocks.getNoteBlockMechanic(placedAgainst);
+        FurnitureMechanic furnitureMechanic = OraxenFurniture.getFurnitureMechanic(placedAgainst);
+        Material type = placedAgainst.getType();
+
+        if (noteBlockMechanic != null) return false;
+        if (furnitureMechanic != null) return furnitureMechanic.isInteractable();
+        if (Tag.STAIRS.isTagged(type)) return false;
+        if (Tag.FENCES.isTagged(type)) return false;
+        if (!type.isInteractable()) return false;
+        return switch (type) {
+            case PUMPKIN, MOVING_PISTON, REDSTONE_ORE, REDSTONE_WIRE -> false;
+            default -> true;
+        };
+    }
 
     public static boolean correctAllBlockStates(Block block, Player player, BlockFace face, ItemStack item) {
         final BlockData data = block.getBlockData();
@@ -261,11 +304,15 @@ public class BlockHelpers {
             else trapDoor.setHalf(Bisected.Half.TOP);
         } else if (data instanceof Stairs stairs) {
             stairs.setFacing(player.getFacing());
-            if (hitLoc.getY() <= toCenterLocation(hitBlock.getLocation()).getY())
+            if (hitFace == BlockFace.UP) stairs.setHalf(Bisected.Half.BOTTOM);
+            else if (hitFace == BlockFace.DOWN) stairs.setHalf(Bisected.Half.TOP);
+            else if (hitLoc.getY() <= toCenterLocation(hitBlock.getLocation()).getY())
                 stairs.setHalf(Bisected.Half.BOTTOM);
             else stairs.setHalf(Bisected.Half.TOP);
         } else if (data instanceof Slab slab) {
-            if (hitLoc.getY() <= toCenterLocation(hitBlock.getLocation()).getY())
+            if (hitFace == BlockFace.UP) slab.setType(Slab.Type.BOTTOM);
+            else if (hitFace == BlockFace.DOWN) slab.setType(Slab.Type.TOP);
+            else if (hitLoc.getY() <= toCenterLocation(hitBlock.getLocation()).getY())
                 slab.setType(Slab.Type.BOTTOM);
             else slab.setType(Slab.Type.TOP);
         }

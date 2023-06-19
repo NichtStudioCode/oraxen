@@ -2,8 +2,9 @@ package io.th0rgal.oraxen;
 
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
+import com.ticxo.playeranimator.PlayerAnimatorImpl;
 import dev.jorel.commandapi.CommandAPI;
-import dev.jorel.commandapi.CommandAPIConfig;
+import dev.jorel.commandapi.CommandAPIBukkitConfig;
 import io.th0rgal.oraxen.api.OraxenItems;
 import io.th0rgal.oraxen.api.events.OraxenItemsLoadedEvent;
 import io.th0rgal.oraxen.commands.CommandsManager;
@@ -15,17 +16,20 @@ import io.th0rgal.oraxen.config.SettingsUpdater;
 import io.th0rgal.oraxen.font.FontManager;
 import io.th0rgal.oraxen.font.packets.InventoryPacketListener;
 import io.th0rgal.oraxen.font.packets.TitlePacketListener;
+import io.th0rgal.oraxen.gestures.GestureManager;
 import io.th0rgal.oraxen.hud.HudManager;
 import io.th0rgal.oraxen.items.ItemUpdater;
 import io.th0rgal.oraxen.mechanics.MechanicsManager;
+import io.th0rgal.oraxen.mechanics.provided.gameplay.furniture.FurnitureFactory;
 import io.th0rgal.oraxen.pack.generation.ResourcePack;
 import io.th0rgal.oraxen.pack.upload.UploadManager;
 import io.th0rgal.oraxen.recipes.RecipesManager;
 import io.th0rgal.oraxen.sound.SoundManager;
 import io.th0rgal.oraxen.utils.AdventureUtils;
 import io.th0rgal.oraxen.utils.OS;
+import io.th0rgal.oraxen.utils.VersionUtil;
 import io.th0rgal.oraxen.utils.actions.ClickActionManager;
-import io.th0rgal.oraxen.utils.armorequipevent.ArmorListener;
+import io.th0rgal.oraxen.utils.armorequipevent.ArmorEquipEvent;
 import io.th0rgal.oraxen.utils.breaker.BreakerSystem;
 import io.th0rgal.oraxen.utils.customarmor.CustomArmorListener;
 import io.th0rgal.oraxen.utils.inventories.InvManager;
@@ -41,6 +45,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class OraxenPlugin extends JavaPlugin {
 
     private static OraxenPlugin oraxen;
+    private static GestureManager gestureManager;
     private ConfigsManager configsManager;
     private BukkitAudiences audience;
     private UploadManager uploadManager;
@@ -51,10 +56,10 @@ public class OraxenPlugin extends JavaPlugin {
     private ResourcePack resourcePack;
     private ClickActionManager clickActionManager;
     private ProtocolManager protocolManager;
+    public static boolean supportsDisplayEntities;
 
-    public OraxenPlugin() throws NoSuchFieldException, IllegalAccessException {
+    public OraxenPlugin() {
         oraxen = this;
-        Logs.enableFilter();
     }
 
     public static OraxenPlugin get() {
@@ -63,29 +68,40 @@ public class OraxenPlugin extends JavaPlugin {
 
     @Override
     public void onLoad() {
-        CommandAPI.onLoad(new CommandAPIConfig().silentLogs(true));
+        CommandAPI.onLoad(new CommandAPIBukkitConfig(this).silentLogs(true));
     }
 
     @Override
     public void onEnable() {
-        CommandAPI.onEnable(this);
+        CommandAPI.onEnable();
         ProtectionLib.init(this);
+        PlayerAnimatorImpl.initialize(this);
         audience = BukkitAudiences.create(this);
         clickActionManager = new ClickActionManager(this);
         reloadConfigs();
+
         if (Settings.KEEP_UP_TO_DATE.toBool())
-            new SettingsUpdater().updateKeys();
-        fontManager = new FontManager(configsManager);
-        hudManager = new HudManager(configsManager);
-        new CommandsManager().loadCommands();
+            new SettingsUpdater().handleSettingsUpdate();
         final PluginManager pluginManager = Bukkit.getPluginManager();
+        if (pluginManager.isPluginEnabled("ProtocolLib")) {
+            protocolManager = ProtocolLibrary.getProtocolManager();
+            new BreakerSystem().registerListener();
+            if (Settings.FORMAT_INVENTORY_TITLES.toBool())
+                protocolManager.addPacketListener(new InventoryPacketListener());
+            protocolManager.addPacketListener(new TitlePacketListener());
+        } else Logs.logWarning("ProtocolLib is not on your server, some features will not work");
+        if (Settings.DISABLE_LEATHER_REPAIR_CUSTOM.toBool())
+            pluginManager.registerEvents(new CustomArmorListener(), this);
+
         resourcePack = new ResourcePack(this);
         MechanicsManager.registerNativeMechanics();
+        supportsDisplayEntities = VersionUtil.isSupportedVersionOrNewer(VersionUtil.v1_19_R3);
         //CustomBlockData.registerListener(this); //Handle this manually
+        hudManager = new HudManager(configsManager);
         fontManager = new FontManager(configsManager);
         soundManager = new SoundManager(configsManager.getSound());
+        gestureManager = new GestureManager();
         OraxenItems.loadItems(configsManager);
-        io.th0rgal.oraxen.items.OraxenItems.loadItems(configsManager);
         fontManager.registerEvents();
         fontManager.verifyRequired(); // Verify the required glyph is there
         hudManager.registerEvents();
@@ -95,38 +111,33 @@ public class OraxenPlugin extends JavaPlugin {
         resourcePack.generate(fontManager, soundManager);
         RecipesManager.load(this);
         invManager = new InvManager();
-        new ArmorListener(Settings.ARMOR_EQUIP_EVENT_BYPASS.toStringList()).registerEvents(this);
+        ArmorEquipEvent.registerListener(this);
         new CommandsManager().loadCommands();
-        postLoading(configsManager);
+        postLoading();
         try {
             Message.PLUGIN_LOADED.log(AdventureUtils.tagResolver("os", OS.getOs().getPlatformName()));
         } catch (Exception ignore) {
         }
         CompatibilitiesManager.enableNativeCompatibilities();
-        if (ProtocolLibrary.getPlugin().isEnabled()) {
-            protocolManager = ProtocolLibrary.getProtocolManager();
-            new BreakerSystem().registerListener();
-            if (Settings.FORMAT_INVENTORY_TITLES.toBool())
-                protocolManager.addPacketListener(new InventoryPacketListener());
-            protocolManager.addPacketListener(new TitlePacketListener());
-        } else Logs.logWarning("ProtocolLib is not on your server, some features will not work");
-        if (Settings.DISABLE_LEATHER_REPAIR_CUSTOM.toBool())
-            pluginManager.registerEvents(new CustomArmorListener(), this);
+        CompileNotice.print();
     }
 
-    private void postLoading(final ConfigsManager configsManager) {
+    private void postLoading() {
         uploadManager = new UploadManager(this);
         uploadManager.uploadAsyncAndSendToPlayers(resourcePack);
         new Metrics(this, 5371);
         Bukkit.getScheduler().runTask(this, () -> {
-            OraxenItems.loadItems(configsManager);
             Bukkit.getPluginManager().callEvent(new OraxenItemsLoadedEvent());
+
         });
     }
 
     @Override
     public void onDisable() {
         unregisterListeners();
+        ItemUpdater.furnitureUpdateTask.cancel();
+        FurnitureFactory.getEvolutionTask().cancel();
+
         CompatibilitiesManager.disableCompatibilities();
         Message.PLUGIN_UNLOADED.log();
     }
@@ -140,6 +151,10 @@ public class OraxenPlugin extends JavaPlugin {
 
     public ProtocolManager getProtocolManager() {
         return protocolManager;
+    }
+
+    public GestureManager getGesturesManager() {
+        return gestureManager;
     }
 
     public BukkitAudiences getAudience() {

@@ -26,7 +26,7 @@ public class RepairCommand {
                 .withArguments(new TextArgument("type").replaceSuggestions(ArgumentSuggestions.strings("hand", "all")))
                 .executes((sender, args) -> {
 
-                    if (sender instanceof Player player) if ((args[0]).equals("hand")) {
+                    if (sender instanceof Player player) if (args.get("type").equals("hand")) {
                         ItemStack item = player.getInventory().getItemInMainHand();
                         if (item.getType() == Material.AIR) {
                             Message.CANNOT_BE_REPAIRED_INVALID.send(sender);
@@ -73,10 +73,10 @@ public class RepairCommand {
             DurabilityMechanic durabilityMechanic = (DurabilityMechanic) durabilityFactory.getMechanic(itemId);
             PersistentDataContainer pdc = itemMeta.getPersistentDataContainer();
             int realMaxDurability = durabilityMechanic.getItemMaxDurability();
-            int damage = realMaxDurability - pdc.get(DurabilityMechanic.DURAB_KEY, PersistentDataType.INTEGER);
+            int damage = realMaxDurability - pdc.get(DurabilityMechanic.DURABILITY_KEY, PersistentDataType.INTEGER);
             if (damage == 0)
                 return true; // full durability
-            pdc.set(DurabilityMechanic.DURAB_KEY, PersistentDataType.INTEGER, realMaxDurability);
+            pdc.set(DurabilityMechanic.DURABILITY_KEY, PersistentDataType.INTEGER, realMaxDurability);
         }
         damageable.setDamage(0);
         itemStack.setItemMeta(damageable);
